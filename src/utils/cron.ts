@@ -161,8 +161,21 @@ export function cronToHuman(expr: string): string {
   const isDaily =
     dayOfMonth.length === 31 && dayOfWeek.length === 7 && isAllMonths;
 
-  // Hourly
+  // Hourly (every minute of every hour — actually means every minute)
+  const isEveryMinute =
+    minute.length === 60 &&
+    hour.length === 24 &&
+    isAllMonths &&
+    dayOfMonth.length === 31 &&
+    dayOfWeek.length === 7;
+
+  if (isEveryMinute) {
+    return "每分钟";
+  }
+
+  // Hourly (specific minute, every hour)
   const isHourly =
+    minute.length < 60 &&
     hour.length === 24 &&
     isAllMonths &&
     dayOfMonth.length === 31 &&
@@ -170,6 +183,15 @@ export function cronToHuman(expr: string): string {
 
   if (isHourly) {
     if (minute.length === 1) return `每小时的第 ${minute[0]} 分`;
+    // Multiple minute values — every N minutes
+    if (minute.length > 1) {
+      // Detect step: check if values are evenly spaced
+      const step = minute[1] - minute[0];
+      const isStep = minute.every(
+        (v, i) => i === 0 || v - minute[i - 1] === step,
+      );
+      if (isStep) return `每${step}分钟`;
+    }
     return `每小时`;
   }
 

@@ -20,6 +20,12 @@ type InboundMessage =
 
 const WORKER_ID = randomUUID();
 
+// Run worker immediately when this module is loaded
+runWorker().catch((err) => {
+  logError(`[worker] fatal error: ${err}`);
+  process.exit(1);
+});
+
 async function runClaudePrompt(
   prompt: string,
 ): Promise<{ data?: unknown; error?: string }> {

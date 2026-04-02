@@ -5,6 +5,7 @@
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { logForDebugging, logError } from "../utils/logger.ts";
 import { loadFeishuConfig, sendFeishuCard } from "../utils/feishuClient.ts";
 import { pollTaskResults, type TaskResult } from "./ipc.ts";
@@ -55,18 +56,14 @@ export async function runSupervisor(
   let workerReadyCount = 0;
 
   for (let i = 0; i < workerCount; i++) {
-    const proc = spawn(
-      "bun",
-      [
-        import.meta.path.replace(
-          /[/\\]daemon[/\\]supervisor\.ts$/,
-          "/daemon/worker.ts",
-        ),
-      ],
-      {
-        stdio: ["pipe", "pipe", "pipe"],
-      },
+    const workerScript = fileURLToPath(import.meta.url).replace(
+      /[/\\]daemon[/\\]supervisor\.ts$/,
+      "/daemon/worker.ts",
     );
+
+    const proc = spawn("bun", [workerScript], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
 
     let ready = false;
 

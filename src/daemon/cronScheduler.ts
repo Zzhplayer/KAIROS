@@ -28,6 +28,8 @@ export function createCronScheduler(opts: CronSchedulerOptions) {
   let running = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let scheduled: ScheduledTask[] = [];
+  // Guard against re-entering onFireTask for the same task within one tick
+  const inFlight = new Set<string>();
 
   function refreshTasks() {
     const tasks = loadCronTasks(dir);
@@ -56,14 +58,18 @@ export function createCronScheduler(opts: CronSchedulerOptions) {
     const delay = nextRun.getTime() - Date.now() + jitterMs;
     if (delay <= 0) {
       // Fire immediately if already due
+      inFlight.add(task.id);
       onFireTask(task);
+      scheduleNextForTask(task);
+      inFlight.delete(task.id);
       return;
     }
 
     timer = setTimeout(() => {
+      inFlight.add(task.id);
       onFireTask(task);
-      // Reschedule after firing
       scheduleNextForTask(task);
+      inFlight.delete(task.id);
     }, delay);
   }
 
@@ -86,7 +92,8 @@ export function createCronScheduler(opts: CronSchedulerOptions) {
 
     const toFire: ScheduledTask[] = [];
     for (const st of scheduled) {
-      if (st.nextRun < minuteAfter) {
+      // Skip tasks already being dispatched (prevents double-fire from immediate callbacks)
+      if (st.nextRun < minuteAfter && !inFlight.has(st.id)) {
         toFire.push(st);
       }
     }
