@@ -97,28 +97,31 @@ export function readRecentSessions(sinceMs: number): SessionFile[] {
 
   for (const agent of DREAM_AGENTS) {
     const dir = sessionsDir(agent);
+    let files: string[] = [];
     try {
-      const files = readdirSync(dir);
-      for (const file of files) {
-        // Skip deleted and reset files
-        if (file.includes(".deleted.") || file.includes(".reset.")) continue;
-        if (!file.endsWith(".jsonl")) continue;
-
-        const filePath = join(dir, file);
-        if (!isRecentSession(filePath, sinceMs)) continue;
-
-        const messages = parseSessionFile(filePath);
-        if (messages.length === 0) continue;
-
-        try {
-          const mtime = statSync(filePath).mtimeMs;
-          results.push({ path: filePath, mtimeMs: mtime, messages });
-        } catch {
-          // Skip
-        }
-      }
+      files = readdirSync(dir);
     } catch {
-      // Agent dir might not exist
+      // Agent dir might not exist — skip this agent only
+      continue;
+    }
+
+    for (const file of files) {
+      // Skip deleted and reset files
+      if (file.includes(".deleted.") || file.includes(".reset.")) continue;
+      if (!file.endsWith(".jsonl")) continue;
+
+      const filePath = join(dir, file);
+      if (!isRecentSession(filePath, sinceMs)) continue;
+
+      const messages = parseSessionFile(filePath);
+      if (messages.length === 0) continue;
+
+      try {
+        const mtime = statSync(filePath).mtimeMs;
+        results.push({ path: filePath, mtimeMs: mtime, messages });
+      } catch {
+        // Skip
+      }
     }
   }
 

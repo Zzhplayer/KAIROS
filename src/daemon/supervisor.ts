@@ -12,6 +12,7 @@ import { pollTaskResults, type TaskResult } from "./ipc.ts";
 import { createCronScheduler } from "./cronScheduler.ts";
 import { createDreamScheduler } from "./dreamScheduler.ts";
 import { activateProactive, deactivateProactive } from "../proactive/index.ts";
+import { markDreamDispatched } from "../services/autoDream/dreamMeta.ts";
 import type { CronTask } from "../utils/cronTasks.ts";
 
 type WorkerEntry = {
@@ -141,6 +142,9 @@ export async function runSupervisor(
 
   // --- Dream dispatch ---
   function dispatchDreamToWorker(): void {
+    // Mark lastRun BEFORE dispatching — prevents double-run on worker crash
+    markDreamDispatched();
+
     const dreamTaskId = `dream-${Date.now()}`;
     // Find an idle worker
     for (let i = 0; i < workers.length; i++) {
