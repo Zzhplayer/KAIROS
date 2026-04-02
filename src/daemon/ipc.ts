@@ -117,12 +117,28 @@ export async function pollTaskResults(
     }
   };
 
-  const id = setInterval(tick, intervalMs);
+  // Use self-rescheduling async loop instead of setInterval with async callback.
+  // Bun's setInterval does not reliably execute async callbacks — the interval
+  // fires but the async tick() is not awaited, causing poll stalls. A explicit
+  // setTimeout chain ensures each tick completes before the next is scheduled.
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleNext = () => {
+    if (stopped) return;
+    timer = setTimeout(async () => {
+      await tick();
+      scheduleNext();
+    }, intervalMs);
+  };
+
   // Run once immediately on start
   await tick();
+  scheduleNext();
 
   return () => {
     stopped = true;
-    clearInterval(id);
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
   };
 }
