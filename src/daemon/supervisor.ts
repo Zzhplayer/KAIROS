@@ -10,6 +10,7 @@ import { logForDebugging, logError } from "../utils/logger.ts";
 import { loadFeishuConfig, sendFeishuCard } from "../utils/feishuClient.ts";
 import { pollTaskResults, type TaskResult } from "./ipc.ts";
 import { createCronScheduler } from "./cronScheduler.ts";
+import { createDreamScheduler } from "./dreamScheduler.ts";
 import { activateProactive, deactivateProactive } from "../proactive/index.ts";
 import type { CronTask } from "../utils/cronTasks.ts";
 
@@ -138,6 +139,30 @@ export async function runSupervisor(
     }
   }
 
+  // --- Dream dispatch ---
+  function dispatchDreamToWorker(): void {
+    const dreamTaskId = `dream-${Date.now()}`;
+    // Find an idle worker
+    for (let i = 0; i < workers.length; i++) {
+      const idx = (nextWorkerIndex + i) % workers.length;
+      const w = workers[idx];
+      if (!w.busy) {
+        w.busy = true;
+        nextWorkerIndex = (idx + 1) % workers.length;
+        const msg = JSON.stringify({
+          type: "dream:trigger",
+          taskId: dreamTaskId,
+        });
+        w.proc.stdin?.write(msg + "\n");
+        logForDebugging(
+          `[supervisor] Dispatched dream consolidation to worker ${w.workerId.slice(0, 8)}`,
+        );
+        return;
+      }
+    }
+    logForDebugging("[supervisor] All workers busy — dream queued");
+  }
+
   // --- Cron scheduler ---
   const scheduler = createCronScheduler({
     onFireTask: dispatchToWorker,
@@ -169,6 +194,16 @@ export async function runSupervisor(
   // --- Proactive heartbeat ---
   activateProactive("supervisor");
 
+  // --- Dream scheduler (24h memory consolidation) ---
+  const DREAM_INTERVAL_MS = parseInt(
+    process.env["KAIROS_DREAM_INTERVAL_MS"] ?? String(24 * 60 * 60 * 1000),
+    10,
+  );
+  const stopDreamScheduler = createDreamScheduler({
+    onDreamFire: dispatchDreamToWorker,
+    intervalMs: DREAM_INTERVAL_MS,
+  });
+
   // --- Start scheduler ---
   scheduler.start();
 
@@ -176,6 +211,7 @@ export async function runSupervisor(
   const shutdown = async () => {
     logForDebugging("[supervisor] Shutting down");
     deactivateProactive();
+    stopDreamScheduler();
     scheduler.stop();
     stopPoller();
 
