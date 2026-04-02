@@ -2,7 +2,7 @@
 
 > 主动式 Agent 框架，让 AI 主动行动，而非被动等待指令。
 
-KAIROS 是一个长期运行的 daemon 系统，基于 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 构建，负责定时触发任务、结果推送。
+KAIROS 是一个长期运行的 daemon 系统，基于 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 构建，负责定时触发任务、结果推送、记忆整合。
 
 ## 特性
 
@@ -10,7 +10,7 @@ KAIROS 是一个长期运行的 daemon 系统，基于 [Claude Code](https://doc
 - **飞书通知** ✅ — 任务完成/失败自动推送 Feishu 卡片到群
 - **GitHub Webhook** ✅ — PR 事件（opened/closed/merged/review）实时推送飞书
 - **Proactive 心跳** ✅ — 30 秒心跳保活，always-on 后台运行
-- **记忆整合（DREAM）** 🔜 — 定时对话记忆 consolidation（规划中）
+- **记忆整合（DREAM）** ✅ — 每24小时从 OpenClaw 会话中提取关键事实、决策、教训，写入 ~/.claude/dream-memories/memories.md 并注册 qmd
 
 ## 安装
 
@@ -73,6 +73,7 @@ export KAIROS_FEISHU_NOTIFY_ID="oc_YOUR_REAL_FEISHU_ID"
 | `KAIROS_WORKER_COUNT` | `2` | Worker 进程数 |
 | `KAIROS_HEARTBEAT_INTERVAL_MS` | `30000` | 心跳间隔（毫秒）|
 | `KAIROS_CRON_JITTER_MS` | `60000` | Cron 抖动上限 |
+| `KAIROS_DREAM_INTERVAL_MS` | `86400000` | DREAM 记忆整合间隔（毫秒，默认24小时）|
 | `KAIROS_GITHUB_WEBHOOK_SECRET` | — | GitHub Webhook HMAC 密钥 |
 | `KAIROS_GITHUB_APP_INSTALLATION_ID` | — | 自循环防护的 GitHub App 安装 ID |
 
@@ -94,12 +95,15 @@ src/
 │   ├── supervisor.ts        # 主进程（Supervisor）
 │   ├── worker.ts            # Worker 进程
 │   ├── ipc.ts              # 文件轮询 IPC
-│   ├── cronScheduler.ts    # Cron 调度器
-│   └── webhookServer.ts    # GitHub Webhook 服务器
+│   ├── cronScheduler.ts     # Cron 调度器
+│   ├── dreamScheduler.ts    # DREAM 记忆整合调度器（24h）
+│   └── webhookServer.ts     # GitHub Webhook 服务器
 ├── proactive/
 │   └── index.ts            # 心跳控制器
 ├── services/autoDream/
-│   └── autoDream.ts        # 记忆整合（stub，TODO: 实现 consolidation）
+│   ├── autoDream.ts        # 记忆整合主逻辑
+│   ├── dreamMeta.ts        # consolidation 元数据
+│   └── sessionReader.ts    # OpenClaw 会话读取器
 └── utils/
     ├── cron.ts             # Cron 表达式解析
     ├── cronTasks.ts        # 任务配置读写
