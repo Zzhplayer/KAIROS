@@ -152,6 +152,5 @@ export async function runWorker(
 
   process.stdin.on("end", () => {
     logForDebugging(`[worker ${WORKER_ID.slice(0, 8)}] stdin closed`);
-    process.exit(0);
   });
 }

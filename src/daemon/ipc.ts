@@ -11,7 +11,6 @@ import {
   unlinkSync,
   writeFileSync,
   existsSync,
-  statSync,
 } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -74,7 +73,6 @@ export function clearTaskPending(taskId: string): void {
 /**
  * Supervisor-side: poll for new task results.
  * Calls `onResult` for each new result file discovered.
- * Deletes result file and pending marker after processing each result.
  * Returns a stop function — call it to terminate the poller.
  */
 export async function pollTaskResults(
@@ -84,38 +82,10 @@ export async function pollTaskResults(
   const seen = new Set<string>();
   let stopped = false;
 
-  // Clean stale pending markers older than 1 hour (crash recovery)
-  function cleanStalePending() {
-    try {
-      if (!existsSync(pendingDir())) return;
-      const pendingFiles = readdirSync(pendingDir());
-      const staleMs = 60 * 60 * 1000;
-      const now = Date.now();
-      for (const file of pendingFiles) {
-        if (!file.startsWith("pending-") || !file.endsWith(".json")) continue;
-        const filePath = join(pendingDir(), file);
-        try {
-          const mtimeMs = statSync(filePath).mtimeMs;
-          if (now - mtimeMs > staleMs) {
-            unlinkSync(filePath);
-          }
-        } catch {
-          // ignore
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }
-
   const tick = async () => {
     if (stopped) return;
     try {
       if (!existsSync(IPC_DIR)) return;
-
-      // Clean stale pending files every tick
-      cleanStalePending();
-
       const files = readdirSync(IPC_DIR);
       for (const file of files) {
         if (!file.startsWith("result-") || !file.endsWith(".ndjson")) continue;
@@ -124,35 +94,22 @@ export async function pollTaskResults(
         seen.add(taskId);
 
         const path = join(IPC_DIR, file);
-        let raw = "";
-        try {
-          raw = readFileSync(path, "utf-8");
-        } catch {
-          // File may have been deleted since readdir
-          seen.delete(taskId);
-          continue;
-        }
-
-        let hasContent = false;
+        const raw = readFileSync(path, "utf-8");
         for (const line of raw.split("\n")) {
           const trimmed = line.trim();
           if (!trimmed) continue;
           try {
             const result = JSON.parse(trimmed) as TaskResult;
             onResult(result);
-            hasContent = true;
           } catch {
             // skip malformed lines
           }
         }
-
-        // Delete result file after processing so it doesn't pile up
-        if (hasContent) {
-          try {
-            unlinkSync(path);
-          } catch {
-            // ignore if already gone
-          }
+        // Clean up result file after all lines are processed
+        try {
+          unlinkSync(path);
+        } catch {
+          // File may already be deleted; ignore
         }
       }
     } catch {

@@ -12,7 +12,6 @@ import { pollTaskResults, type TaskResult } from "./ipc.ts";
 import { createCronScheduler } from "./cronScheduler.ts";
 import { createDreamScheduler } from "./dreamScheduler.ts";
 import { activateProactive, deactivateProactive } from "../proactive/index.ts";
-import { markDreamDispatched } from "../services/autoDream/dreamMeta.ts";
 import type { CronTask } from "../utils/cronTasks.ts";
 
 type WorkerEntry = {
@@ -56,51 +55,71 @@ export async function runSupervisor(
   // --- Worker pool ---
   const workers: WorkerEntry[] = [];
   let workerReadyCount = 0;
+  let running = false;
 
-  for (let i = 0; i < workerCount; i++) {
-    const workerScript = fileURLToPath(import.meta.url).replace(
-      /[/\\]daemon[/\\]supervisor\.ts$/,
-      "/daemon/worker.ts",
-    );
+  /**
+   * Spawn a single worker and register its event handlers.
+   * Returns a promise that resolves when the worker is ready.
+   */
+  function spawnWorker(): Promise<WorkerEntry> {
+    return new Promise((resolve) => {
+      const workerScript = fileURLToPath(import.meta.url).replace(
+        /[/\\]daemon[/\\]supervisor\.ts$/,
+        "/daemon/worker.ts",
+      );
 
-    const proc = spawn("bun", [workerScript], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+      const proc = spawn("bun", [workerScript], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
 
-    let ready = false;
+      proc.stdout?.on("data", (chunk: Buffer) => {
+        const line = chunk.toString().trim();
+        if (line.includes('"type":"ready"')) {
+          const match = line.match(/"workerId":"([^"]+)"/);
+          const workerId = match?.[1] ?? randomUUID();
+          const entry: WorkerEntry = { workerId, proc, busy: false };
+          workers.push(entry);
+          workerReadyCount++;
+          logForDebugging(
+            `[supervisor] Worker ready ${workerId.slice(0, 8)} (${workerReadyCount}/${workerCount})`,
+          );
+          resolve(entry);
+        }
+      });
 
-    proc.stdout?.on("data", (chunk: Buffer) => {
-      const line = chunk.toString().trim();
-      if (!ready && line.includes('"type":"ready"')) {
-        const match = line.match(/"workerId":"([^"]+)"/);
-        const workerId = match?.[1] ?? randomUUID();
-        workers.push({ workerId, proc, busy: false });
-        workerReadyCount++;
+      proc.stderr?.on("data", (chunk: Buffer) => {
+        logError(`[worker] ${chunk.toString().trim()}`);
+      });
+
+      proc.on("exit", (code) => {
         logForDebugging(
-          `[supervisor] Worker ${i} ready (${workerReadyCount}/${workerCount})`,
+          `[supervisor] Worker exited code ${code} — removing from pool`,
         );
-        ready = true;
-      }
-    });
-
-    proc.stderr?.on("data", (chunk: Buffer) => {
-      logError(`[worker ${i}] ${chunk.toString().trim()}`);
-    });
-
-    proc.on("exit", (code) => {
-      logForDebugging(`[supervisor] Worker ${i} exited with code ${code}`);
+        // Remove dead worker from pool
+        const idx = workers.findIndex((w) => w.proc === proc);
+        if (idx !== -1) {
+          workers.splice(idx, 1);
+          workerReadyCount = Math.max(0, workerReadyCount - 1);
+        }
+        // Respawn to maintain pool size
+        if (running) {
+          spawnWorker().catch((err) => {
+            logError(`[supervisor] Failed to respawn worker: ${err}`);
+          });
+        }
+      });
     });
   }
 
+  // Spawn initial workers in parallel
+  const spawnPromises: Promise<WorkerEntry>[] = [];
+  for (let i = 0; i < workerCount; i++) {
+    spawnPromises.push(spawnWorker());
+  }
+
   // Wait for all workers to become ready
-  await new Promise<void>((resolve) => {
-    const check = setInterval(() => {
-      if (workerReadyCount >= workerCount) {
-        clearInterval(check);
-        resolve();
-      }
-    }, 100);
-  });
+  running = true;
+  await Promise.all(spawnPromises);
 
   logForDebugging(`[supervisor] All ${workerCount} workers ready`);
 
@@ -142,9 +161,6 @@ export async function runSupervisor(
 
   // --- Dream dispatch ---
   function dispatchDreamToWorker(): void {
-    // Mark lastRun BEFORE dispatching — prevents double-run on worker crash
-    markDreamDispatched();
-
     const dreamTaskId = `dream-${Date.now()}`;
     // Find an idle worker
     for (let i = 0; i < workers.length; i++) {
@@ -214,6 +230,7 @@ export async function runSupervisor(
   // --- Graceful shutdown ---
   const shutdown = async () => {
     logForDebugging("[supervisor] Shutting down");
+    running = false;
     deactivateProactive();
     stopDreamScheduler();
     scheduler.stop();

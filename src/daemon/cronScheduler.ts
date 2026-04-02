@@ -59,21 +59,29 @@ export function createCronScheduler(opts: CronSchedulerOptions) {
     if (delay <= 0) {
       // Fire immediately if already due
       inFlight.add(task.id);
-      onFireTask(task);
+      try {
+        onFireTask(task);
+      } finally {
+        inFlight.delete(task.id);
+      }
       scheduleNextForTask(task);
-      inFlight.delete(task.id);
       return;
     }
 
     timer = setTimeout(() => {
       inFlight.add(task.id);
-      onFireTask(task);
+      try {
+        onFireTask(task);
+      } finally {
+        inFlight.delete(task.id);
+      }
       scheduleNextForTask(task);
-      inFlight.delete(task.id);
     }, delay);
   }
 
   function scheduleNextForTask(task: CronTask) {
+    // Remove old entry for this task to prevent accumulation
+    scheduled = scheduled.filter((st) => st.id !== task.id);
     try {
       const nextRun = computeNextCronRun(task.schedule);
       scheduleDelay(nextRun, task);
@@ -85,12 +93,15 @@ export function createCronScheduler(opts: CronSchedulerOptions) {
   }
 
   function tick() {
+    if (!running) return;
     const now = Date.now();
     const minuteBoundary = new Date(now);
     minuteBoundary.setSeconds(0, 0);
     const minuteAfter = new Date(minuteBoundary.getTime() + 60_000);
 
     const toFire: ScheduledTask[] = [];
+    const firedIds = new Set<string>();
+
     for (const st of scheduled) {
       // Skip tasks already being dispatched (prevents double-fire from immediate callbacks)
       if (st.nextRun < minuteAfter && !inFlight.has(st.id)) {
@@ -117,6 +128,11 @@ export function createCronScheduler(opts: CronSchedulerOptions) {
   function start() {
     if (running) return;
     running = true;
+    // Cancel any pre-existing timer to prevent double-fires on restart
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
     logForDebugging("[cronScheduler] Starting");
 
     // Load and compute initial schedule
