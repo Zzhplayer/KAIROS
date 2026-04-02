@@ -2,15 +2,15 @@
 
 > 主动式 Agent 框架，让 AI 主动行动，而非被动等待指令。
 
-KAIROS 是一个长期运行的 daemon 系统，基于 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 构建，负责定时触发任务、记忆整合、结果推送。
+KAIROS 是一个长期运行的 daemon 系统，基于 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 构建，负责定时触发任务、结果推送。
 
 ## 特性
 
-- **定时任务执行** — cron 表达式调度，自动触发 Claude Code 执行 prompt
-- **飞书通知** — 任务完成/失败自动推送 Feishu 卡片到群
-- **GitHub Webhook** — PR 事件（opened/closed/merged/review）实时推送飞书
-- **记忆整合（DREAM）** — 定时对话记忆 consolidation
-- **Proactive 心跳** — 30 秒心跳保活，always-on 后台运行
+- **定时任务执行** ✅ — cron 表达式调度，自动触发 Claude Code 执行 prompt
+- **飞书通知** ✅ — 任务完成/失败自动推送 Feishu 卡片到群
+- **GitHub Webhook** ✅ — PR 事件（opened/closed/merged/review）实时推送飞书
+- **Proactive 心跳** ✅ — 30 秒心跳保活，always-on 后台运行
+- **记忆整合（DREAM）** 🔜 — 定时对话记忆 consolidation（规划中）
 
 ## 安装
 
@@ -99,7 +99,7 @@ src/
 ├── proactive/
 │   └── index.ts            # 心跳控制器
 ├── services/autoDream/
-│   └── autoDream.ts        # 记忆整合
+│   └── autoDream.ts        # 记忆整合（stub，TODO: 实现 consolidation）
 └── utils/
     ├── cron.ts             # Cron 表达式解析
     ├── cronTasks.ts        # 任务配置读写
