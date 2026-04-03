@@ -93,8 +93,8 @@ if (process.env["KAIROS_ENABLED"] === "true") {
     console.error("Supervisor fatal error:", err);
     process.exit(1);
   });
+} else {
+  // Default: show help
+  printHelp();
+  console.log("\n提示: 设置 KAIROS_ENABLED=true 以启动 daemon 模式");
 }
-
-// Default: show help
-printHelp();
-console.log("\n提示: 设置 KAIROS_ENABLED=true 以启动 daemon 模式");
