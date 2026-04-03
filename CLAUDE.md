@@ -20,53 +20,54 @@ No build step needed — Bun runs TypeScript directly.
            ↓ (every 30s — tick evaluates tasks)
            ↓
 Tick handler: evaluate cron schedules, dispatch due tasks
-(sends proactive Feishu "Task Triggered" card before dispatch)
            ↓
 cronScheduler → fires at exact minute boundaries (independent)
            ↓
-Worker Pool ← dispatch via stdin
-Worker spawns "bun run claude -p --dangerously-skip-permissions <prompt>"
+dispatchToWorker() ← single authority for cooldown enforcement
            ↓
-Worker writes NDJSON result → ~/.claude/debug/kairos-ipc/result-{taskId}.ndjson
+Worker Pool ← dispatch via stdin
+Worker spawns "/Users/happy/.local/bin/claude -p --dangerously-skip-permissions <prompt>"
+           ↓
+Worker writes NDJSON → ~/.claude/debug/kairos-ipc/result-{randomUUID}.ndjson
            ↓
 Supervisor IPC poller (500ms, self-rescheduling setTimeout) reads result
            ↓
 Feishu notification on completion (if configured)
 ```
 
-### Tick Mechanism
+### Tick + CronScheduler Cooperation
 
-Every 30s (`KAIROS_HEARTBEAT_INTERVAL_MS`), the tick callback evaluates all scheduled tasks:
-- Compute `nextCronRun` for each task from current minute
-- Fire if `nextRun <= currentTime` AND task not fired in last 90s (cooldown)
-- Send proactive Feishu "Task Triggered" card before dispatching
-- CronScheduler fires at minute boundaries independently — tick and cron cooperate via 90s cooldown
+Both tick and cronScheduler call the same `dispatchToWorker()` function, which enforces a 90s cooldown via `recentlyFired` Map. This prevents double-fire when both mechanisms fire the same task within the cooldown window.
 
-`src/proactive/index.ts`: `onTick(cb)` / `offTick()` register tick callbacks.
-`src/daemon/supervisor.ts`: tick handler registered at startup, unregistered at shutdown.
+- Tick: fires every 30s, evaluates if task is due
+- cronScheduler: fires at minute boundaries, independent of tick
+- 90s cooldown: `dispatchToWorker()` checks `Date.now() - lastFired < 90000`
+
+`src/daemon/supervisor.ts` tick handler registered via `onTick()` at startup.
 
 ### Key Files
 
 | File | Role |
 |---|---|
 | `src/daemon/supervisor.ts` | Main daemon — spawns workers, dispatches tasks, polls IPC |
-| `src/daemon/worker.ts` | Worker — receives tasks via stdin, executes via claude -p, writes result |
-| `src/daemon/ipc.ts` | File-based IPC — Workers write NDJSON, Supervisor polls |
-| `src/daemon/cronScheduler.ts` | Dynamic setTimeout cron — NOT setInterval. Fires at minute boundaries |
+| `src/daemon/worker.ts` | Worker — receives tasks via stdin, executes claude -p, writes NDJSON result |
+| `src/daemon/ipc.ts` | File-based IPC — Workers write NDJSON, Supervisor polls every 500ms |
+| `src/daemon/cronScheduler.ts` | Dynamic setTimeout chain cron — fires at minute boundaries |
 | `src/daemon/dreamScheduler.ts` | 24h DREAM consolidation trigger |
-| `src/services/autoDream/autoDream.ts` | Memory consolidation — runs claude -p on Claude Code sessions |
+| `src/services/autoDream/autoDream.ts` | Memory consolidation from Claude Code sessions |
 | `src/services/autoDream/sessionReader.ts` | Reads Claude Code sessions from `~/.claude/projects/-Users-happy/*.jsonl` |
-| `src/proactive/index.ts` | Heartbeat activation (calls `activateProactive`) |
+| `src/proactive/index.ts` | Heartbeat + tick — `onTick(cb)` / `offTick()` |
 
 ## Critical Implementation Notes
 
 ### Bun setInterval async bug
-`setInterval` with an async callback does NOT work reliably in Bun 1.x — the timer fires but async ticks are not awaited, causing pollers to stall silently. **Every polling loop must use a self-rescheduling `setTimeout` chain** (see `ipc.ts` line ~110 and `cronScheduler.ts`).
+`setInterval` with an async callback does NOT work reliably in Bun 1.x — the timer fires but async ticks are not awaited, causing pollers to stall silently. **Every polling loop must use a self-rescheduling `setTimeout` chain** (see `ipc.ts` and `cronScheduler.ts`).
 
 ### IPC directory
 - **Result dir**: `~/.claude/debug/kairos-ipc/` (NDJSON result files)
 - **Pending dir**: `~/.claude/debug/kairos-ipc/pending/` (in-flight task markers)
-- Result files are deleted after the poller processes them — if a daemon restarts with stale result files present, workers get permanently marked `busy` and all cron fires are discarded.
+- **CRITICAL**: Every dispatch MUST use a unique randomUUID as the IPC taskId. Using `task.id` (e.g. "tick-test") causes result file collisions when multiple workers dispatch the same task — the second result overwrites the first, poller skips it, worker stays permanently busy.
+- Always clean IPC dir on daemon restart: `rm -f ~/.claude/debug/kairos-ipc/result-*.ndjson`
 
 ### DREAM data source
 Memory consolidation reads from `~/.claude/projects/-Users-happy/*.jsonl` (Claude Code sessions), NOT OpenClaw sessions. Session format per line: `type: "user"|"assistant"`, `message.role`, `message.content` (string or array of text blocks).
@@ -75,7 +76,7 @@ Memory consolidation reads from `~/.claude/projects/-Users-happy/*.jsonl` (Claud
 Workers are long-running `spawn("bun", ...)` processes. They send `{type: "ready", workerId}` on stdout when started. The Supervisor uses `proc.on("exit")` to detect death and auto-respawns if `running=true`.
 
 ### Cron jitter
-`cronScheduler.ts` adds up to 60s random jitter before firing to prevent thundering herd. The jitter is applied per-task via `scheduleDelay(task.nextRun, task, jitter(60000))`.
+`cronScheduler.ts` adds up to 60s random jitter before firing to prevent thundering herd.
 
 ## Environment Variables
 
@@ -84,7 +85,7 @@ Workers are long-running `spawn("bun", ...)` processes. They send `{type: "ready
 | `KAIROS_ENABLED` | `false` | Must be `true` to start daemon |
 | `KAIROS_WORKER_COUNT` | `2` | Number of parallel workers |
 | `KAIROS_FEISHU_NOTIFY_ID` | — | Feishu group/user ID (oc_xxx or ou_xxx) |
-| `KAIROS_HEARTBEAT_INTERVAL_MS` | `30000` | Heartbeat + tick interval (single timer, both fire together) |
+| `KAIROS_HEARTBEAT_INTERVAL_MS` | `30000` | Heartbeat + tick interval |
 | `KAIROS_DREAM_INTERVAL_MS` | `86400000` | DREAM consolidation interval (24h) |
 | `KAIROS_CRON_JITTER_MS` | `60000` | Max jitter before cron fire |
 
