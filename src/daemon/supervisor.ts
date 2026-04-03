@@ -11,8 +11,18 @@ import { loadFeishuConfig, sendFeishuCard } from "../utils/feishuClient.ts";
 import { pollTaskResults, type TaskResult } from "./ipc.ts";
 import { createCronScheduler } from "./cronScheduler.ts";
 import { createDreamScheduler } from "./dreamScheduler.ts";
-import { activateProactive, deactivateProactive } from "../proactive/index.ts";
-import type { CronTask } from "../utils/cronTasks.ts";
+import {
+  activateProactive,
+  deactivateProactive,
+  onTick,
+  offTick,
+} from "../proactive/index.ts";
+import {
+  loadCronTasks,
+  saveCronTasks,
+  type CronTask,
+} from "../utils/cronTasks.ts";
+import { computeNextCronRun } from "../utils/cron.ts";
 
 type WorkerEntry = {
   workerId: string;
@@ -224,6 +234,66 @@ export async function runSupervisor(
     intervalMs: DREAM_INTERVAL_MS,
   });
 
+  // --- Tick handler: proactive task evaluation every 30s ---
+  // Track recently fired tasks to prevent double-fire with cronScheduler
+  const recentlyFired = new Map<string, number>(); // taskId → lastFireTimestamp
+  const FIRE_COOLDOWN_MS = 90_000; // 90s — prevents overlap with cronScheduler
+
+  function tickEvaluateTasks(_now: Date): void {
+    if (!running) return;
+
+    const tasks = loadCronTasks();
+    const now = new Date();
+    const currentMinute = new Date(now);
+    currentMinute.setSeconds(0, 0);
+
+    let fired = 0;
+    for (const task of tasks) {
+      try {
+        const nextRun = computeNextCronRun(task.schedule, currentMinute);
+        // Due if nextRun is at or before current time
+        if (nextRun > currentMinute) continue;
+
+        // Skip if recently fired (cooldown to avoid double with cronScheduler)
+        const lastFired = recentlyFired.get(task.id);
+        if (
+          lastFired !== undefined &&
+          now.getTime() - lastFired < FIRE_COOLDOWN_MS
+        ) {
+          continue;
+        }
+
+        recentlyFired.set(task.id, now.getTime());
+        fired++;
+
+        // Send proactive Feishu notification before dispatching
+        if (feishuAccount && FEISHU_NOTIFY_ID) {
+          const card = {
+            config: { wide_screen_mode: true },
+            elements: [
+              {
+                tag: "markdown",
+                content: `**KAIROS Tick — Task Triggered**\nTask: \`${task.id}\`\nPrompt: \`${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? "..." : ""}\`\nSchedule: \`${task.schedule}\`\nStatus: Dispatching to worker...`,
+              },
+            ],
+          };
+          sendFeishuCard(feishuAccount, FEISHU_NOTIFY_ID, card).catch(() => {});
+        }
+
+        dispatchToWorker(task);
+      } catch {
+        // Invalid cron expression — skip
+      }
+    }
+
+    if (fired > 0) {
+      logForDebugging(`[supervisor] Tick fired ${fired} task(s)`);
+    }
+  }
+
+  // Register tick handler with the proactive module
+  onTick(tickEvaluateTasks);
+
   // --- Start scheduler ---
   scheduler.start();
 
@@ -231,6 +301,7 @@ export async function runSupervisor(
   const shutdown = async () => {
     logForDebugging("[supervisor] Shutting down");
     running = false;
+    offTick();
     deactivateProactive();
     stopDreamScheduler();
     scheduler.stop();
