@@ -20,12 +20,8 @@ let _heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 let _tickCallback: ((now: Date) => void) | null = null;
 let _isActive = false;
 
-const DEFAULT_HEARTBEAT_INTERVAL_MS = parseInt(
+const DEFAULT_INTERVAL_MS = parseInt(
   process.env["KAIROS_HEARTBEAT_INTERVAL_MS"] ?? "30000",
-  10,
-);
-const DEFAULT_TICK_INTERVAL_MS = parseInt(
-  process.env["KAIROS_TICK_INTERVAL_MS"] ?? "30000",
   10,
 );
 
@@ -52,9 +48,7 @@ export function activateProactive(label?: string): void {
   if (_isActive) return;
   _isActive = true;
 
-  logForDebugging(
-    `[proactive] Activated (heartbeat=${DEFAULT_HEARTBEAT_INTERVAL_MS}ms, tick=${DEFAULT_TICK_INTERVAL_MS}ms)`,
-  );
+  logForDebugging(`[proactive] Activated (interval=${DEFAULT_INTERVAL_MS}ms)`);
 
   // Single timer handles both heartbeat and tick
   _heartbeatInterval = setInterval(() => {
@@ -72,7 +66,7 @@ export function activateProactive(label?: string): void {
         logForDebugging(`[proactive] tick callback error: ${String(err)}`);
       }
     }
-  }, DEFAULT_TICK_INTERVAL_MS);
+  }, DEFAULT_INTERVAL_MS);
 
   // Don't keep process alive purely for heartbeats
   _heartbeatInterval.unref?.();
