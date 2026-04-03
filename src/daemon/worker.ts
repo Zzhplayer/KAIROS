@@ -30,9 +30,10 @@ async function runClaudePrompt(
   prompt: string,
 ): Promise<{ data?: unknown; error?: string }> {
   return new Promise((resolve) => {
+    // Use full path to claude binary to avoid PATH issues in launchd context
     const child = spawn(
-      "bun",
-      ["run", "claude", "-p", "--dangerously-skip-permissions", prompt],
+      "/Users/happy/.local/bin/claude",
+      ["-p", "--dangerously-skip-permissions", prompt],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
 
