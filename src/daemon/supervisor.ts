@@ -156,7 +156,10 @@ export async function runSupervisor(
       if (!w.busy) {
         w.busy = true;
         nextWorkerIndex = (idx + 1) % workers.length;
-        const taskId = task.id ?? randomUUID();
+        // Always use a random UUID as the dispatch taskId so each IPC result
+        // file is unique and the poller never skips a result due to a stale
+        // "seen" entry for the same task.id (e.g. "tick-test" dispatched twice).
+        const taskId = randomUUID();
 
         // Mark as fired immediately to prevent double-dispatch
         recentlyFired.set(task.id, Date.now());
