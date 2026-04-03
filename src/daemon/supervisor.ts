@@ -133,12 +133,23 @@ export async function runSupervisor(
 
   logForDebugging(`[supervisor] All ${workerCount} workers ready`);
 
+  // --- Shared dispatch state ---
+  // Tracks tasks recently fired to prevent double-fire between tick and cronScheduler.
+  // Updated by BOTH dispatchToWorker (on cronScheduler fire) AND tickEvaluateTasks.
+  const recentlyFired = new Map<string, number>(); // taskId → timestamp
+  const FIRE_COOLDOWN_MS = 90_000; // 90s — covers cronScheduler jitter window
+
   // --- Task dispatch ---
   let nextWorkerIndex = 0;
 
-  function dispatchToWorker(task: CronTask): void {
+  function dispatchToWorker(task: CronTask): boolean {
+    // Check cooldown — skip if recently fired by either tick or cronScheduler
+    const lastFired = recentlyFired.get(task.id);
+    if (lastFired !== undefined && Date.now() - lastFired < FIRE_COOLDOWN_MS) {
+      return false;
+    }
+
     // Find an idle worker
-    let found = false;
     for (let i = 0; i < workers.length; i++) {
       const idx = (nextWorkerIndex + i) % workers.length;
       const w = workers[idx];
@@ -146,6 +157,9 @@ export async function runSupervisor(
         w.busy = true;
         nextWorkerIndex = (idx + 1) % workers.length;
         const taskId = task.id ?? randomUUID();
+
+        // Mark as fired immediately to prevent double-dispatch
+        recentlyFired.set(task.id, Date.now());
 
         const msg = JSON.stringify({
           type: "task",
@@ -157,16 +171,14 @@ export async function runSupervisor(
         logForDebugging(
           `[supervisor] Dispatched task ${taskId} to worker ${w.workerId.slice(0, 8)}`,
         );
-        found = true;
-        break;
+        return true;
       }
     }
 
-    if (!found) {
-      logForDebugging(
-        "[supervisor] All workers busy — task queued (not implemented)",
-      );
-    }
+    logForDebugging(
+      "[supervisor] All workers busy — task queued (not implemented)",
+    );
+    return false;
   }
 
   // --- Dream dispatch ---
@@ -235,52 +247,42 @@ export async function runSupervisor(
   });
 
   // --- Tick handler: proactive task evaluation every 30s ---
-  // Track recently fired tasks to prevent double-fire with cronScheduler
-  const recentlyFired = new Map<string, number>(); // taskId → lastFireTimestamp
-  const FIRE_COOLDOWN_MS = 90_000; // 90s — prevents overlap with cronScheduler
-
+  // dispatchToWorker now handles cooldown internally
   function tickEvaluateTasks(_now: Date): void {
     if (!running) return;
 
     const tasks = loadCronTasks();
     const now = new Date();
-    const currentMinute = new Date(now);
-    currentMinute.setSeconds(0, 0);
 
     let fired = 0;
     for (const task of tasks) {
       try {
+        // Check if task is due: nextCronRun from current minute <= now
+        const currentMinute = new Date(now);
+        currentMinute.setSeconds(0, 0);
         const nextRun = computeNextCronRun(task.schedule, currentMinute);
-        // Due if nextRun is at or before current time
         if (nextRun > currentMinute) continue;
 
-        // Skip if recently fired (cooldown to avoid double with cronScheduler)
-        const lastFired = recentlyFired.get(task.id);
-        if (
-          lastFired !== undefined &&
-          now.getTime() - lastFired < FIRE_COOLDOWN_MS
-        ) {
-          continue;
+        // Try to dispatch (cooldown checked inside dispatchToWorker)
+        if (dispatchToWorker(task)) {
+          fired++;
+
+          // Send proactive Feishu notification
+          if (feishuAccount && FEISHU_NOTIFY_ID) {
+            const card = {
+              config: { wide_screen_mode: true },
+              elements: [
+                {
+                  tag: "markdown",
+                  content: `**KAIROS Tick — Task Triggered**\nTask: \`${task.id}\`\nPrompt: \`${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? "..." : ""}\`\nSchedule: \`${task.schedule}\`\nStatus: Dispatching to worker...`,
+                },
+              ],
+            };
+            sendFeishuCard(feishuAccount, FEISHU_NOTIFY_ID, card).catch(
+              () => {},
+            );
+          }
         }
-
-        recentlyFired.set(task.id, now.getTime());
-        fired++;
-
-        // Send proactive Feishu notification before dispatching
-        if (feishuAccount && FEISHU_NOTIFY_ID) {
-          const card = {
-            config: { wide_screen_mode: true },
-            elements: [
-              {
-                tag: "markdown",
-                content: `**KAIROS Tick — Task Triggered**\nTask: \`${task.id}\`\nPrompt: \`${task.prompt.slice(0, 80)}${task.prompt.length > 80 ? "..." : ""}\`\nSchedule: \`${task.schedule}\`\nStatus: Dispatching to worker...`,
-              },
-            ],
-          };
-          sendFeishuCard(feishuAccount, FEISHU_NOTIFY_ID, card).catch(() => {});
-        }
-
-        dispatchToWorker(task);
       } catch {
         // Invalid cron expression — skip
       }
