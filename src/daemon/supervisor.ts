@@ -217,12 +217,21 @@ export async function runSupervisor(
   // --- IPC result poller ---
   const stopPoller = await pollTaskResults(async (result: TaskResult) => {
     logForDebugging(
-      `[supervisor] Result received: ${result.taskId} success=${result.success}`,
+      `[supervisor] Result received: ${result.taskId} worker=${result.workerId} success=${result.success}`,
     );
 
     // Mark worker idle
     const w = workers.find((wk) => wk.workerId === result.workerId);
-    if (w) w.busy = false;
+    if (w) {
+      w.busy = false;
+      logForDebugging(
+        `[supervisor] Worker ${result.workerId.slice(0, 8)} marked idle`,
+      );
+    } else {
+      logForDebugging(
+        `[supervisor] Worker ${result.workerId.slice(0, 8)} NOT FOUND in pool — may have exited`,
+      );
+    }
 
     // Send Feishu notification
     if (feishuAccount && FEISHU_NOTIFY_ID) {
