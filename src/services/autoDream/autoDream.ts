@@ -1,9 +1,9 @@
 /**
- * AutoDream — periodic memory consolidation service.
+ * AutoDream — periodic memory consolidation service for Claude Code.
  *
  * Consolidation cycle:
  * 1. Load dream meta (last run time)
- * 2. Read recent sessions from OpenClaw agents (main, bot6)
+ * 2. Read recent sessions from Claude Code (~/.claude/projects/-Users-happy/)
  * 3. Use claude -p to extract key facts and decisions
  * 4. Write consolidated memory to dream-memories.md
  * 5. Register with qmd for retrieval
