@@ -216,8 +216,9 @@ export async function runSupervisor(
 
   // --- IPC result poller ---
   const stopPoller = await pollTaskResults(async (result: TaskResult) => {
+    const poolIds = workers.map((w) => w.workerId.slice(0, 8));
     logForDebugging(
-      `[supervisor] Result received: ${result.taskId} worker=${result.workerId} success=${result.success}`,
+      `[supervisor] Result received: ${result.taskId} resultWorker=${result.workerId.slice(0, 8)} pool=${poolIds.join(",")} busy=[${workers.map((w) => (w.busy ? "busy" : "idle")).join(",")}]`,
     );
 
     // Mark worker idle
