@@ -10,7 +10,8 @@ KAIROS 是一个长期运行的 daemon 系统，基于 [Claude Code](https://doc
 - **飞书通知** ✅ — 任务完成/失败自动推送 Feishu 卡片到群
 - **GitHub Webhook** ✅ — PR 事件（opened/closed/merged/review）实时推送飞书
 - **Proactive 心跳** ✅ — 30 秒心跳保活，always-on 后台运行
-- **记忆整合（DREAM）** ✅ — 每24小时从 OpenClaw 会话中提取关键事实、决策、教训，写入 ~/.claude/dream-memories/memories.md 并注册 qmd
+- **Tick 主动调度** ✅ — 每30秒评估任务，cron边界外也能主动触发（与cronScheduler共用90s冷却防止重复）
+- **记忆整合（DREAM）** ✅ — 每24小时从 Claude Code 会话（`~/.claude/projects/-Users-happy/*.jsonl`）中提取关键事实、决策、教训，写入 `~/.claude/dream-memories/memories.md` 并注册 qmd
 
 ## 安装
 
@@ -42,6 +43,14 @@ bun install
 ```bash
 KAIROS_ENABLED=true bun run src/entrypoints/cli.tsx
 ```
+
+### 开机自启（macOS launchd）
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.launch.kairos.daemon.plist
+```
+
+守护进程由 `~/.claude/scripts/kairos-keepalive.sh` 管理，崩溃自动重启。
 
 ### 配置飞书通知
 
@@ -103,7 +112,7 @@ src/
 ├── services/autoDream/
 │   ├── autoDream.ts        # 记忆整合主逻辑
 │   ├── dreamMeta.ts        # consolidation 元数据
-│   └── sessionReader.ts    # OpenClaw 会话读取器
+│   └── sessionReader.ts    # Claude Code 会话读取器
 └── utils/
     ├── cron.ts             # Cron 表达式解析
     ├── cronTasks.ts        # 任务配置读写
