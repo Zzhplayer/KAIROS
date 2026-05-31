@@ -15,6 +15,10 @@ const SUPPORTED_EVENTS = new Set([
   "issue_comment",
 ]);
 
+function headerToString(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
 /** Verify that the request body matches the X-Hub-Signature-256 header. */
 function verifySignature(
   rawBody: string,
@@ -148,9 +152,11 @@ export function startWebhookServer(port = 3001): { stop: () => void } {
       return;
     }
 
-    const signature = req.headers["x-hub-signature-256"] ?? "";
-    const event = req.headers["x-github-event"] ?? "";
-    const installationId = req.headers["x-github-app-installation-id"] ?? "";
+    const signature = headerToString(req.headers["x-hub-signature-256"]);
+    const event = headerToString(req.headers["x-github-event"]);
+    const installationId = headerToString(
+      req.headers["x-github-app-installation-id"],
+    );
 
     // Reject unsupported events
     if (!SUPPORTED_EVENTS.has(event)) {
@@ -177,7 +183,7 @@ export function startWebhookServer(port = 3001): { stop: () => void } {
     // Verify signature if secret is configured
     if (
       WEBHOOK_SECRET &&
-      !verifySignature(rawBody, String(signature), WEBHOOK_SECRET)
+      !verifySignature(rawBody, signature, WEBHOOK_SECRET)
     ) {
       logError("[webhook] Invalid signature — rejecting request");
       res.writeHead(401);

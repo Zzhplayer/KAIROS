@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest a maintainer workflow or daemon improvement.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Maintainer problem
+      description: What OSS maintenance workflow would this improve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the daemon, webhook, worker, or documentation change.
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Security or reliability considerations
+      description: Mention webhook, worker execution, logging, or local file access risks.

@@ -226,7 +226,7 @@ export async function executeAutoDream(): Promise<void> {
     const prompt = buildConsolidationPrompt(sessionsText);
     const result = await runClaudePrompt(prompt);
 
-    if (!result.ok) {
+    if (result.ok === false) {
       logError(
         `[autoDream] Consolidation failed: ${result.reason} ${result.detail ?? ""}`,
       );

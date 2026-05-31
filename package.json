@@ -1,7 +1,7 @@
 {
   "name": "kairos",
-  "version": "1.0.0",
-  "description": "KAIROS — 主动式 Agent 框架，让 AI 主动行动而非被动等待指令",
+  "version": "0.1.0",
+  "description": "KAIROS - proactive agent daemon for scheduled OSS maintenance workflows",
   "type": "module",
   "author": "zzz",
   "engines": {
@@ -9,7 +9,9 @@
   },
   "scripts": {
     "daemon": "bun run src/entrypoints/cli.tsx",
-    "webhook": "bun run src/entrypoints/cli.tsx webhook"
+    "webhook": "bun run src/entrypoints/cli.tsx webhook",
+    "typecheck": "tsc --noEmit",
+    "ci": "bun run typecheck"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
